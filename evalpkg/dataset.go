@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	skill "github.com/Priy6anshu/llmsh/skillpkg"
+	skill "github.com/llmskillhub/cli/skillpkg"
 )
 
 // DatasetReport is what one dataset amounts to, and what the review screen

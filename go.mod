@@ -1,4 +1,4 @@
-module github.com/Priy6anshu/llmsh
+module github.com/llmskillhub/cli
 
 go 1.25.0
 

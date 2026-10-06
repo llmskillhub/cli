@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/Priy6anshu/llmsh/internal/workdir"
+	"github.com/llmskillhub/cli/internal/workdir"
 )
 
 /*

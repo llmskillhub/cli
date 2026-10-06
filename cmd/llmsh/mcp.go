@@ -10,9 +10,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Priy6anshu/llmsh/internal/client"
-	"github.com/Priy6anshu/llmsh/internal/config"
-	"github.com/Priy6anshu/llmsh/mcp"
+	"github.com/llmskillhub/cli/internal/client"
+	"github.com/llmskillhub/cli/internal/config"
+	"github.com/llmskillhub/cli/mcp"
 )
 
 // cmdMCP serves the catalogue over MCP on stdio.

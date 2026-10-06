@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	skill "github.com/Priy6anshu/llmsh/skillpkg"
+	skill "github.com/llmskillhub/cli/skillpkg"
 )
 
 // EvalShape tells skillpkg what an eval package looks like.

@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/Priy6anshu/llmsh/internal/workdir"
+	"github.com/llmskillhub/cli/internal/workdir"
 )
 
 // writeOrigin makes dir look like a working copy of owner/slug.

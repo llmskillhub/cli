@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Priy6anshu/llmsh/internal/workdir"
+	"github.com/llmskillhub/cli/internal/workdir"
 )
 
 // TestSwapInReplacesContentsAndKeepsTheMarker covers the update path used by

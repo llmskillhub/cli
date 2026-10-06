@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	skill "github.com/Priy6anshu/llmsh/skillpkg"
+	skill "github.com/llmskillhub/cli/skillpkg"
 )
 
 func zipOf(t *testing.T, files map[string]string) (*bytes.Reader, int64) {

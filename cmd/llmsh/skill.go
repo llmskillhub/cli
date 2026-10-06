@@ -8,11 +8,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Priy6anshu/llmsh/internal/client"
-	"github.com/Priy6anshu/llmsh/internal/config"
-	"github.com/Priy6anshu/llmsh/internal/gitinfo"
-	"github.com/Priy6anshu/llmsh/internal/workdir"
-	skill "github.com/Priy6anshu/llmsh/skillpkg"
+	"github.com/llmskillhub/cli/internal/client"
+	"github.com/llmskillhub/cli/internal/config"
+	"github.com/llmskillhub/cli/internal/gitinfo"
+	"github.com/llmskillhub/cli/internal/workdir"
+	skill "github.com/llmskillhub/cli/skillpkg"
 )
 
 // report prints validation findings the same way the web uploader does, using

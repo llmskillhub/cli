@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Priy6anshu/llmsh/internal/client"
-	"github.com/Priy6anshu/llmsh/internal/config"
+	"github.com/llmskillhub/cli/internal/client"
+	"github.com/llmskillhub/cli/internal/config"
 )
 
 // cmdLogin stores an access token.

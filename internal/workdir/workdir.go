@@ -12,7 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
-	skill "github.com/Priy6anshu/llmsh/skillpkg"
+	skill "github.com/llmskillhub/cli/skillpkg"
 )
 
 // Dir is the marker directory. Stripped when packing, so it never ships.

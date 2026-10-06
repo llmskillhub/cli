@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	skill "github.com/Priy6anshu/llmsh/skillpkg"
+	skill "github.com/llmskillhub/cli/skillpkg"
 	"gopkg.in/yaml.v3"
 )
 

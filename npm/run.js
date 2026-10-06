@@ -18,7 +18,7 @@ try {
   console.error(
     `llmsh: no binary for ${process.platform}/${process.arch}.\n` +
       `  Expected ${pkg}, which npm did not install.\n` +
-      `  Builds: https://github.com/Priy6anshu/llmsh/releases`,
+      `  Builds: https://github.com/llmskillhub/cli/releases`,
   );
   process.exit(1);
 }

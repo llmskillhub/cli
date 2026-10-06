@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	skill "github.com/Priy6anshu/llmsh/skillpkg"
+	skill "github.com/llmskillhub/cli/skillpkg"
 )
 
 // cmdInit scaffolds a skill.

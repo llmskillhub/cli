@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	skill "github.com/Priy6anshu/llmsh/skillpkg"
+	skill "github.com/llmskillhub/cli/skillpkg"
 )
 
 // cmdInstall downloads a skill and unpacks it where an agent will find it.

@@ -11,7 +11,7 @@ review, and installs published ones with their tree digest verified.
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Priy6anshu/llmsh/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/llmskillhub/cli/main/install.sh | sh
 ```
 
 ```sh
@@ -19,10 +19,10 @@ npm install -g llmskillhub     # the command is still llmsh
 ```
 
 ```sh
-go install github.com/Priy6anshu/llmsh/cmd/llmsh@latest
+go install github.com/llmskillhub/cli/cmd/llmsh@latest
 ```
 
-Or take a binary from [releases](https://github.com/Priy6anshu/llmsh/releases).
+Or take a binary from [releases](https://github.com/llmskillhub/cli/releases).
 Every release publishes `SHA256SUMS`; the installer checks it and refuses to
 install a file that does not match.
 

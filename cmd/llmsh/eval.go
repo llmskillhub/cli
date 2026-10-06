@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Priy6anshu/llmsh/internal/client"
-	"github.com/Priy6anshu/llmsh/internal/gitinfo"
-	"github.com/Priy6anshu/llmsh/evalpkg"
-	skill "github.com/Priy6anshu/llmsh/skillpkg"
+	"github.com/llmskillhub/cli/internal/client"
+	"github.com/llmskillhub/cli/internal/gitinfo"
+	"github.com/llmskillhub/cli/evalpkg"
+	skill "github.com/llmskillhub/cli/skillpkg"
 )
 
 // evalsEnabled reports whether this build will touch the second kind at all.

@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Priy6anshu/llmsh/internal/client"
-	"github.com/Priy6anshu/llmsh/internal/workdir"
-	skill "github.com/Priy6anshu/llmsh/skillpkg"
+	"github.com/llmskillhub/cli/internal/client"
+	"github.com/llmskillhub/cli/internal/workdir"
+	skill "github.com/llmskillhub/cli/skillpkg"
 )
 
 // cmdClone fetches a skill's source into a directory you can edit and publish.

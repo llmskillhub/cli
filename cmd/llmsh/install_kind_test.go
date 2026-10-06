@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	skill "github.com/Priy6anshu/llmsh/skillpkg"
+	skill "github.com/llmskillhub/cli/skillpkg"
 )
 
 func writeFiles(t *testing.T, dir string, files map[string]string) {

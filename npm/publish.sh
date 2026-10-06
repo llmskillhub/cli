@@ -26,7 +26,7 @@ for a in "$@"; do
   esac
 done
 
-REPO="${LLMSH_REPO:-Priy6anshu/llmsh}"
+REPO="${LLMSH_REPO:-llmskillhub/cli}"
 SCOPE="${LLMSH_NPM_SCOPE:-@llmskillhub}"
 WRAPPER="${LLMSH_NPM_NAME:-llmskillhub}"
 BASE="https://github.com/$REPO/releases/download/v$VERSION"

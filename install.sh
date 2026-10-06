@@ -1,7 +1,7 @@
 #!/bin/sh
 # Install llmsh.
 #
-#   curl -fsSL https://raw.githubusercontent.com/Priy6anshu/llmsh/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/llmskillhub/cli/main/install.sh | sh
 #
 # Downloads the release binary for this machine, checks it against the
 # published SHA256SUMS, and puts it on your PATH. Reads the checksum file from
@@ -10,7 +10,7 @@
 # is not.
 set -eu
 
-REPO="${LLMSH_REPO:-Priy6anshu/llmsh}"
+REPO="${LLMSH_REPO:-llmskillhub/cli}"
 BIN_DIR="${LLMSH_BIN_DIR:-$HOME/.local/bin}"
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
