@@ -386,11 +386,11 @@ func (c *Client) downloadPackage(owner, slug, version string) (archive []byte, d
 
 // SkillSummary is a catalogue entry as the list and detail endpoints return it.
 type SkillSummary struct {
-	Owner       string   `json:"owner"`
-	Slug        string   `json:"slug"`
+	Owner string `json:"owner"`
+	Slug  string `json:"slug"`
 	// Kind is "skill" or "eval". Sent on every listing row by the API; carried
 	// here so the agent-facing tools can say which one a result is.
-	Kind string `json:"kind"`
+	Kind        string   `json:"kind"`
 	FullName    string   `json:"full_name"`
 	Description string   `json:"description"`
 	Categories  []string `json:"categories"`
@@ -466,6 +466,154 @@ func (c *Client) Skill(owner, slug string) (*SkillSummary, error) {
 		return nil, err
 	}
 	return &out, nil
+}
+
+// postJSON sends a JSON body and decodes the JSON reply. A nil body sends an
+// empty object, which the API's decoder accepts.
+func (c *Client) postJSON(path string, body, out any) error {
+	var buf bytes.Buffer
+	if body == nil {
+		body = map[string]any{}
+	}
+	if err := json.NewEncoder(&buf).Encode(body); err != nil {
+		return err
+	}
+	req, err := http.NewRequest("POST", c.API+path, &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.do(req, out)
+}
+
+// AttachResult is one target skill's outcome from an attach or detach.
+type AttachResult struct {
+	Skill string `json:"skill"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
+
+// AttachEval attaches one eval to one or more of the caller's skills. skills
+// are "owner/slug" references. See docs/14.
+func (c *Client) AttachEval(evalOwner, evalSlug string, skills []string) ([]AttachResult, error) {
+	return c.attachOrDetach("attach", evalOwner, evalSlug, skills)
+}
+
+// DetachEval is the reverse.
+func (c *Client) DetachEval(evalOwner, evalSlug string, skills []string) ([]AttachResult, error) {
+	return c.attachOrDetach("detach", evalOwner, evalSlug, skills)
+}
+
+func (c *Client) attachOrDetach(verb, evalOwner, evalSlug string, skills []string) ([]AttachResult, error) {
+	var out struct {
+		Results []AttachResult `json:"results"`
+	}
+	path := fmt.Sprintf("/v1/evals/%s/%s/%s",
+		url.PathEscape(evalOwner), url.PathEscape(evalSlug), verb)
+	if err := c.postJSON(path, map[string]any{"skills": skills}, &out); err != nil {
+		return nil, err
+	}
+	return out.Results, nil
+}
+
+// AttachedEval is one eval attached to a skill, as the list surfaces it.
+type AttachedEval struct {
+	FullName string `json:"full_name"`
+	Slug     string `json:"slug"`
+	Owner    string `json:"owner"`
+	Source   string `json:"source"`
+	Private  bool   `json:"private"`
+}
+
+// SkillEvals lists the evals attached to one skill, as the caller may see them.
+func (c *Client) SkillEvals(owner, slug string) ([]AttachedEval, error) {
+	var out struct {
+		Evals []AttachedEval `json:"evals"`
+	}
+	if err := c.getJSON(fmt.Sprintf("/v1/skills/%s/%s/evals",
+		url.PathEscape(owner), url.PathEscape(slug)), &out); err != nil {
+		return nil, err
+	}
+	return out.Evals, nil
+}
+
+// EvalRun is one run, as the CLI prints it.
+type EvalRun struct {
+	ID string `json:"id"`
+	// Eval is the eval's owner/slug.
+	Eval       string         `json:"eval,omitempty"`
+	Trigger    string         `json:"trigger,omitempty"`
+	Status     string         `json:"status"`
+	Visibility string         `json:"visibility"`
+	Score      *float64       `json:"score,omitempty"`
+	MaxScore   *float64       `json:"max_score,omitempty"`
+	Tallies    map[string]int `json:"tallies,omitempty"`
+	Summary    string         `json:"summary,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	Model      string         `json:"model,omitempty"`
+	Method     string         `json:"method,omitempty"`
+	// Integrity is what the platform found about the eval itself; Counted
+	// is false when a serious finding keeps the score out of the public one.
+	Integrity []IntegrityFlag `json:"integrity,omitempty"`
+	Counted   *bool           `json:"counted,omitempty"`
+	CreatedAt string          `json:"created_at,omitempty"`
+}
+
+// IntegrityFlag is one finding about an author-written eval.
+type IntegrityFlag struct {
+	Flag    string `json:"flag"`
+	Serious bool   `json:"serious"`
+	Detail  string `json:"detail,omitempty"`
+}
+
+// RunEval queues a run of one eval against one of the caller's skills, both
+// "owner/slug". Returns the run id to poll. The client header records that a
+// CLI started it, which the server stores as the run's trigger.
+func (c *Client) RunEval(evalRef, skillRef string) (*EvalRun, error) {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(map[string]string{"eval": evalRef, "skill": skillRef}); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequest("POST", c.API+"/v1/eval-runs", &buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-LLMSH-Client", "cli")
+	// The 202 names the run as run_id, not id: it is a receipt for a run,
+	// not the run itself.
+	var out struct {
+		RunID  string `json:"run_id"`
+		Status string `json:"status"`
+	}
+	if err := c.do(req, &out); err != nil {
+		return nil, err
+	}
+	if out.RunID == "" {
+		return nil, fmt.Errorf("the server queued the run but did not say its id")
+	}
+	return &EvalRun{ID: out.RunID, Status: out.Status}, nil
+}
+
+// EvalRunStatus polls one run.
+func (c *Client) EvalRunStatus(id string) (*EvalRun, error) {
+	var out EvalRun
+	if err := c.getJSON("/v1/eval-runs/"+url.PathEscape(id), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SkillRuns lists a skill's runs.
+func (c *Client) SkillRuns(owner, slug string) ([]EvalRun, error) {
+	var out struct {
+		Runs []EvalRun `json:"runs"`
+	}
+	if err := c.getJSON(fmt.Sprintf("/v1/skills/%s/%s/runs",
+		url.PathEscape(owner), url.PathEscape(slug)), &out); err != nil {
+		return nil, err
+	}
+	return out.Runs, nil
 }
 
 // Category is one entry in the catalogue's fixed vocabulary.

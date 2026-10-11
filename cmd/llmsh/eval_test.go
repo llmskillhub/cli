@@ -7,17 +7,13 @@ import (
 	"testing"
 )
 
-// TestTheSwitchFailsClosed pins the default.
-//
-// Every spelling of "no", and every spelling of nothing, has to leave evals
-// off -- the services refuse a kind=eval publish without their own switch, so
-// a CLI that offered the path anyway would send somebody into a 404 that reads
-// as a fault in their package.
-func TestTheSwitchFailsClosed(t *testing.T) {
+// TestTheSwitchDefaultsOn pins the default now that evals have launched:
+// unset is on, and only an explicit "no" turns them off, for a self-hosted
+// catalogue without evals.
+func TestTheSwitchDefaultsOn(t *testing.T) {
 	cases := map[string]bool{
-		"1": true, "true": true, "TRUE": true, "yes": true, "on": true, " 1 ": true,
-		"": false, "0": false, "false": false, "no": false, "off": false,
-		"enabled": false, "y": false, "2": false,
+		"1": true, "true": true, "yes": true, "on": true, "": true, "anything": true,
+		"0": false, "false": false, "FALSE": false, "no": false, "off": false, " off ": false,
 	}
 	for in, want := range cases {
 		t.Setenv("LLMSH_EVALS", in)
@@ -26,8 +22,8 @@ func TestTheSwitchFailsClosed(t *testing.T) {
 		}
 	}
 	os.Unsetenv("LLMSH_EVALS")
-	if evalsEnabled() {
-		t.Error("unset must be off")
+	if !evalsEnabled() {
+		t.Error("unset must be on")
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/llmskillhub/cli/internal/client"
 	"github.com/llmskillhub/cli/internal/gitinfo"
@@ -17,21 +18,21 @@ import (
 
 // evalsEnabled reports whether this build will touch the second kind at all.
 //
-// Off unless asked for, matching the services: the API and ingest carry their
-// own EVALS_ENABLED and refuse a kind=eval publish without it, so a CLI that
-// offered the path anyway would send somebody into a 404 that reads as a fault
-// in their package. One switch, three processes, all failing closed.
+// On, now that llmskillhub.com has launched evals (EVALS_ENABLED on the API
+// and ingest). It was off until then, so a CLI could not send somebody into a
+// 404 that read as a fault in their package; that reason is gone for the
+// default catalogue. LLMSH_EVALS=0 (or false, no, off) still turns it off,
+// for a self-hosted catalogue that has not switched evals on.
 //
 // Read from the environment rather than taken as a flag on the command,
 // because it is not a per-invocation choice: it says whether this catalogue
-// has evals yet. The spellings match EVALS_ENABLED for the same reason -- the
-// person setting it is setting the same thing in three places.
+// has evals. The spellings match EVALS_ENABLED.
 func evalsEnabled() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("LLMSH_EVALS"))) {
-	case "1", "true", "yes", "on":
-		return true
+	case "0", "false", "no", "off":
+		return false
 	}
-	return false
+	return true
 }
 
 // isEvalDir reports whether a directory holds an eval rather than a skill.
@@ -159,14 +160,287 @@ func cmdEval(args []string) error {
 			"  Set LLMSH_EVALS=1 if this catalogue accepts them")
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: llmsh eval get owner/name[@version] [--dir ./evals]")
+		return fmt.Errorf("usage:\n" +
+			"  llmsh eval get    owner/name[@version] [--dir ./evals]\n" +
+			"  llmsh eval attach owner/name --to owner/skill [owner/skill ...]\n" +
+			"  llmsh eval detach owner/name --from owner/skill [owner/skill ...]\n" +
+			"  llmsh eval list   --skill owner/skill\n" +
+			"  llmsh eval run    owner/name --skill owner/skill [--wait]\n" +
+			"  llmsh eval runs   --skill owner/skill")
 	}
 	switch args[0] {
 	case "get":
 		return cmdEvalGet(args[1:])
+	case "attach":
+		return cmdEvalAttach(args[1:], true)
+	case "detach":
+		return cmdEvalAttach(args[1:], false)
+	case "list":
+		return cmdEvalList(args[1:])
+	case "run":
+		return cmdEvalRun(args[1:])
+	case "runs":
+		return cmdEvalRuns(args[1:])
 	default:
-		return fmt.Errorf("llmsh eval: unknown subcommand %q\n  Only `get` so far", args[0])
+		return fmt.Errorf("llmsh eval: unknown subcommand %q\n  Try get, attach, detach, list, run or runs", args[0])
 	}
+}
+
+// cmdEvalRun queues a run of one eval against one of the caller's skills, and
+// with --wait polls until it is terminal and prints the score.
+func cmdEvalRun(args []string) error {
+	fs := flag.NewFlagSet("eval run", flag.ExitOnError)
+	skillRef := fs.String("skill", "", "the skill to run against, owner/slug")
+	wait := fs.Bool("wait", false, "poll until the run finishes and print the score")
+	rest := parseArgs(fs, args)
+	if len(rest) == 0 || *skillRef == "" {
+		return fmt.Errorf("usage: llmsh eval run owner/name --skill owner/skill [--wait]")
+	}
+	eo, en, _ := parseRef(rest[0])
+	so, sn, _ := parseRef(*skillRef)
+	if eo == "" || so == "" {
+		return fmt.Errorf("name both as owner/slug: the eval and --skill")
+	}
+	c, _, err := clientFromConfig()
+	if err != nil {
+		return err
+	}
+	run, err := c.RunEval(eo+"/"+en, so+"/"+sn)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("queued run %s\n", run.ID)
+	if !*wait {
+		fmt.Printf("  llmsh eval runs --skill %s/%s   to see it\n", so, sn)
+		return nil
+	}
+	// Poll every 5s for up to 5 minutes, the same as the web. A run that takes
+	// longer still finishes; `llmsh eval runs` shows it.
+	for i := 0; i < 60; i++ {
+		time.Sleep(5 * time.Second)
+		cur, err := c.EvalRunStatus(run.ID)
+		if err != nil {
+			return err
+		}
+		switch cur.Status {
+		case "succeeded":
+			printRun(cur)
+			return nil
+		case "failed":
+			return fmt.Errorf("run failed: %s", cur.Error)
+		case "canceled":
+			return fmt.Errorf("run was canceled")
+		}
+	}
+	fmt.Println("  still running; check back with llmsh eval runs")
+	return nil
+}
+
+// cmdEvalRuns lists a skill's runs.
+func cmdEvalRuns(args []string) error {
+	fs := flag.NewFlagSet("eval runs", flag.ExitOnError)
+	skillRef := fs.String("skill", "", "the skill, owner/slug")
+	parseArgs(fs, args)
+	if *skillRef == "" {
+		return fmt.Errorf("usage: llmsh eval runs --skill owner/skill")
+	}
+	owner, name, _ := parseRef(*skillRef)
+	if owner == "" {
+		return fmt.Errorf("which skill? use owner/slug")
+	}
+	c, _, err := clientFromConfig()
+	if err != nil {
+		return err
+	}
+	runs, err := c.SkillRuns(owner, name)
+	if err != nil {
+		return err
+	}
+	if len(runs) == 0 {
+		fmt.Printf("No runs for %s/%s yet.\n", owner, name)
+		return nil
+	}
+	// Newest first, as the server returns them; private runs -- the owner's
+	// own and the hidden platform checks -- under a heading of their own, the
+	// way the web groups them.
+	var public, private []client.EvalRun
+	for _, r := range runs {
+		if r.Visibility == "public" {
+			public = append(public, r)
+		} else {
+			private = append(private, r)
+		}
+	}
+	for i := range public {
+		printRun(&public[i])
+	}
+	if len(private) > 0 {
+		if len(public) > 0 {
+			fmt.Println()
+		}
+		fmt.Println("Private")
+		for i := range private {
+			printRun(&private[i])
+		}
+	}
+	return nil
+}
+
+// evalLabel is how a run's eval is named: a platform check by what it checks.
+func evalLabel(ref string) string {
+	if rest, ok := strings.CutPrefix(ref, "llmskillhub/platform-"); ok {
+		return "Platform check: " + strings.ReplaceAll(rest, "-", " ")
+	}
+	if ref == "" {
+		return "eval"
+	}
+	return ref
+}
+
+func printRun(r *client.EvalRun) {
+	score := "—"
+	if r.Score != nil && r.MaxScore != nil && *r.MaxScore > 0 {
+		score = fmt.Sprintf("%.0f%%", 100*(*r.Score)/(*r.MaxScore))
+	}
+	id := r.ID
+	if len(id) > 8 {
+		id = id[:8]
+	}
+	line := fmt.Sprintf("  %-9s %5s  %s  #%s", r.Status, score, evalLabel(r.Eval), id)
+	if r.Method != "" {
+		line += "  " + r.Method
+	}
+	if r.Model != "" {
+		line += "  (" + r.Model + ")"
+	}
+	if t, err := time.Parse(time.RFC3339Nano, r.CreatedAt); err == nil {
+		line += "  " + t.Local().Format("2006-01-02 15:04")
+	}
+	fmt.Println(line)
+	if r.Summary != "" || r.Error != "" {
+		msg := r.Summary
+		if r.Error != "" {
+			msg = r.Error
+		}
+		fmt.Printf("      %s\n", msg)
+	}
+	// What the platform found about the eval, and whether the score counts.
+	var flags []string
+	for _, f := range r.Integrity {
+		label := strings.ReplaceAll(f.Flag, "_", " ")
+		if f.Detail != "" {
+			label += " (" + f.Detail + ")"
+		}
+		flags = append(flags, label)
+	}
+	if r.Counted != nil && !*r.Counted {
+		flags = append(flags, "not counted in the public score")
+	}
+	if len(flags) > 0 {
+		fmt.Printf("      ! %s\n", strings.Join(flags, "; "))
+	}
+}
+
+// cmdEvalAttach attaches (or detaches) one eval to one or more of the caller's
+// skills. Only the skill's owner may attach, so the eval is named once and the
+// skills follow it, which is also how an owner attaches one community eval
+// across a whole suite in a single command.
+func cmdEvalAttach(args []string, attach bool) error {
+	verb, prep := "attach", "--to"
+	if !attach {
+		verb, prep = "detach", "--from"
+	}
+	fs := flag.NewFlagSet("eval "+verb, flag.ExitOnError)
+	var skills multiFlag
+	fs.Var(&skills, strings.TrimPrefix(prep, "--"), "a skill of yours, owner/slug (repeatable)")
+	rest := parseArgs(fs, args)
+	if len(rest) == 0 {
+		return fmt.Errorf("usage: llmsh eval %s owner/name %s owner/skill [owner/skill ...]", verb, prep)
+	}
+	// Everything after the eval reference that is not a flag is also a target,
+	// so `--to a/b c/d` and `--to a/b --to c/d` both work.
+	targets := append([]string(skills), rest[1:]...)
+	if len(targets) == 0 {
+		return fmt.Errorf("name at least one of your skills with %s owner/slug", prep)
+	}
+	owner, name, _ := parseRef(rest[0])
+	if owner == "" {
+		return fmt.Errorf("which publisher wrote the eval? use owner/name")
+	}
+
+	c, _, err := clientFromConfig()
+	if err != nil {
+		return err
+	}
+	var results []client.AttachResult
+	if attach {
+		results, err = c.AttachEval(owner, name, targets)
+	} else {
+		results, err = c.DetachEval(owner, name, targets)
+	}
+	if err != nil {
+		return err
+	}
+	done := verb + "ed"
+	bad := 0
+	for _, r := range results {
+		if r.OK {
+			fmt.Printf("  %s → %s\n", done, r.Skill)
+		} else {
+			bad++
+			fmt.Printf("  skipped %s: %s\n", r.Skill, r.Error)
+		}
+	}
+	if bad == len(results) {
+		return fmt.Errorf("nothing was %s", done)
+	}
+	return nil
+}
+
+// cmdEvalList shows the evals attached to one skill.
+func cmdEvalList(args []string) error {
+	fs := flag.NewFlagSet("eval list", flag.ExitOnError)
+	skillRef := fs.String("skill", "", "the skill, owner/slug")
+	parseArgs(fs, args)
+	if *skillRef == "" {
+		return fmt.Errorf("usage: llmsh eval list --skill owner/skill")
+	}
+	owner, name, _ := parseRef(*skillRef)
+	if owner == "" {
+		return fmt.Errorf("which skill? use owner/slug")
+	}
+	c, _, err := clientFromConfig()
+	if err != nil {
+		return err
+	}
+	evals, err := c.SkillEvals(owner, name)
+	if err != nil {
+		return err
+	}
+	if len(evals) == 0 {
+		fmt.Printf("No evals attached to %s/%s yet.\n", owner, name)
+		return nil
+	}
+	for _, e := range evals {
+		tags := ""
+		if e.Private {
+			tags += " (private)"
+		}
+		if e.Source == "platform" {
+			tags += " (platform check)"
+		}
+		fmt.Printf("  %s%s\n", e.FullName, tags)
+	}
+	return nil
+}
+
+// multiFlag collects a repeatable string flag.
+type multiFlag []string
+
+func (m *multiFlag) String() string { return strings.Join(*m, ",") }
+func (m *multiFlag) Set(v string) error {
+	*m = append(*m, v)
+	return nil
 }
 
 /*
