@@ -23,9 +23,14 @@ var OfficialKeys = map[string]bool{
 // standalone validator does not. `version` alone appears in 13 of 31 published
 // skills, so treating these as errors would reject a large slice of the real
 // ecosystem. They warn instead.
+//
+// disallowed-tools joined when the official marketplace shipped it (the
+// math-proof plugin) beside argument-hint and disable-model-invocation: a
+// Claude Code plugin field like them, on skills Claude Code loads.
 var DriftKeys = map[string]bool{
 	"version": true, "user-invocable": true, "tools": true,
 	"argument-hint": true, "disable-model-invocation": true,
+	"disallowed-tools": true,
 }
 
 var nameRe = regexp.MustCompile(`^[a-z0-9-]+$`)
@@ -255,6 +260,33 @@ const (
 	HubKeyLegacy = "skillhub"
 )
 
+// CapabilitiesStated reports whether the manifest carried a capabilities block
+// at all.
+//
+// The typed struct cannot answer this: "network: false" and a manifest that
+// never mentioned the network are the same zero value, and the scanner grades
+// those differently -- accusing someone of contradicting a claim they never
+// made is how a scanner loses its audience. The raw metadata map still has the
+// shape of what was written, so the question is answerable there.
+//
+// It reads the namespace decodeHub reads, by the same rule: the current key,
+// else the old one. Asking only the old key -- which is what the scanners did
+// -- treated every manifest written against the current guide as silent.
+func (m *Manifest) CapabilitiesStated() bool {
+	if m == nil {
+		return false
+	}
+	hub, ok := m.Metadata[HubKey].(map[string]any)
+	if !ok {
+		hub, ok = m.Metadata[HubKeyLegacy].(map[string]any)
+	}
+	if !ok {
+		return false
+	}
+	_, ok = hub["capabilities"]
+	return ok
+}
+
 // decodeHub pulls metadata.llmskillhub into typed form. Unknown keys under our
 // own namespace are tolerated — this is our field and we may add to it.
 //
@@ -347,7 +379,7 @@ func driftHint(key string) string {
 	switch key {
 	case "version":
 		return "Move it to metadata.llmskillhub.version, or pass --version at publish time."
-	case "user-invocable", "argument-hint", "disable-model-invocation", "tools":
+	case "user-invocable", "argument-hint", "disable-model-invocation", "tools", "disallowed-tools":
 		return "This is a Claude Code plugin field. Keep it if you ship as a plugin; it is ignored elsewhere."
 	}
 	return ""

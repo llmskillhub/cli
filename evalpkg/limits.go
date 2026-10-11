@@ -61,4 +61,8 @@ const (
 // Methods the convention names. The word is a hint to whoever runs the eval
 // rather than a schema we enforce: an unrecognised one is a warning, because
 // this list will be out of date before the catalogue is.
-var Methods = []string{"llm_as_a_judge", "exact_match", "contains", "code_execution", "human"}
+var Methods = []string{"llm_as_a_judge", "exact_match", "contains", "code_execution", "human",
+	// review_decision: each sample names a whole package, and the expected
+	// output is the decision a person made about it. The platform's review
+	// evals use it (apps/api/internal/autoreview, docs/15).
+	"review_decision"}

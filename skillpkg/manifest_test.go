@@ -97,6 +97,36 @@ func TestDriftKeysWarn(t *testing.T) {
 	}
 }
 
+// TestDisallowedToolsWarns pins disallowed-tools as a drift key. It arrived in
+// the official marketplace (the math-proof plugin's solo and siege skills) next
+// to argument-hint and disable-model-invocation, and Claude Code loads those
+// skills -- so refusing it would reject a working published package. It is
+// held here rather than only in the corpus test, which skips wherever the
+// marketplace is not installed, CI included.
+func TestDisallowedToolsWarns(t *testing.T) {
+	src := "---\nname: solo\ndescription: " + strings.Repeat("x", 50) +
+		"\ndisable-model-invocation: true\ndisallowed-tools: WebSearch, WebFetch\n" +
+		"allowed-tools: Read, Grep\n---\nbody"
+	m, res := parse(t, src)
+	if !res.OK() {
+		t.Fatalf("disallowed-tools must not block: %s", res)
+	}
+	found := false
+	for _, k := range m.DriftKeysFound {
+		if k == "disallowed-tools" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("disallowed-tools should be reported as a drift key; got %v", m.DriftKeysFound)
+	}
+	for _, w := range res.Warnings() {
+		if w.Code == "nonstandard_frontmatter_key" && strings.Contains(w.Message, "disallowed-tools") && w.Hint == "" {
+			t.Error("the warning should say what the field is")
+		}
+	}
+}
+
 func TestLineNumbers(t *testing.T) {
 	src := "---\nname: ok-name\ndescription: " + strings.Repeat("x", 50) + "\nbogus: 1\n---\n"
 	_, res := parse(t, src)
@@ -210,5 +240,46 @@ func TestTheCurrentHubKeyWins(t *testing.T) {
 	}
 	if m.Hub.Version != "2.0.0" {
 		t.Errorf("version = %q, want the llmskillhub one", m.Hub.Version)
+	}
+}
+
+// Whether a manifest said anything about capabilities is a different answer
+// from what it said, and the scanner needs both. It has to read the same
+// namespace the typed fields came from -- the current key, the old one, and the
+// current one when a manifest somehow carries both.
+func TestCapabilitiesStatedReadsTheSameKeyAsTheHubFields(t *testing.T) {
+	body := "\n\n# Title\n\n" + strings.Repeat("Body text that is long enough to be a real skill. ", 12)
+	head := "---\nname: pdf-tools\n" +
+		"description: Fills PDF forms from structured data and extracts values back out. " +
+		"Use when the user mentions PDF forms or filling a PDF.\n"
+	cases := map[string]struct {
+		meta string
+		want bool
+	}{
+		"current key with capabilities": {"metadata:\n  llmskillhub:\n    capabilities:\n      network: false\n", true},
+		"old key with capabilities":     {"metadata:\n  skillhub:\n    capabilities:\n      network: false\n", true},
+		"current key, no capabilities":  {"metadata:\n  llmskillhub:\n    version: 1.0.0\n", false},
+		"no hub block at all":           {"", false},
+		// The current key wins for the typed fields, so it wins here too: a
+		// stale old block cannot make a silent manifest look like a claim.
+		"both, only the old one states": {"metadata:\n  skillhub:\n    capabilities:\n      network: false\n  llmskillhub:\n    version: 1.0.0\n", false},
+		"both, only the new one states": {"metadata:\n  skillhub:\n    version: 1.0.0\n  llmskillhub:\n    capabilities:\n      shell: false\n", true},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			m, res := ParseManifest([]byte(head + c.meta + "---" + body))
+			for _, v := range res.Violations {
+				if v.Severity == SeverityError {
+					t.Fatalf("%s — %s", v.Code, v.Message)
+				}
+			}
+			if got := m.CapabilitiesStated(); got != c.want {
+				t.Errorf("CapabilitiesStated() = %v, want %v", got, c.want)
+			}
+		})
+	}
+	var nilManifest *Manifest
+	if nilManifest.CapabilitiesStated() {
+		t.Error("a nil manifest states nothing")
 	}
 }

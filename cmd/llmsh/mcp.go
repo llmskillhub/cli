@@ -160,6 +160,9 @@ func toMCP(s client.SkillSummary) mcp.Skill {
 		Categories: s.Categories, Keywords: s.Keywords,
 		License: s.License, Repository: s.Repository, Downloads: s.Downloads,
 	}
+	if m := s.Match; m != nil {
+		out.Match = &mcp.Match{Confidence: m.Confidence, By: m.By, Words: m.Words}
+	}
 	if s.Latest != nil {
 		out.Latest = &mcp.Version{
 			Version: s.Latest.Version, ShortDigest: s.Latest.ShortDigest,

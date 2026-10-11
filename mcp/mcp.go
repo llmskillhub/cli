@@ -67,6 +67,21 @@ type Skill struct {
 	License, Repository      string
 	Downloads                int
 	Latest                   *Version
+	// Match is why a search returned this skill and how far to trust it. Nil
+	// outside search results, and from a catalogue too old to say.
+	Match *Match
+}
+
+// Match is the catalogue's own account of one search result.
+//
+// A label and its evidence, never a number: the scores underneath are not
+// probabilities, and a percentage would be read as one. The catalogue measures
+// how often each label is right against a labelled set of searches; high has
+// been right about four times in five, low about one in eight.
+type Match struct {
+	Confidence string   // high, medium or low
+	By         []string // what found it: name, words, meaning
+	Words      string   // how many of the query's words it contains, as "3/4"
 }
 
 type Version struct {

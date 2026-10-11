@@ -14,7 +14,7 @@ var Tools = []map[string]any{
 	{
 		"name":        "search_skills",
 		"title":       "Search skills",
-		"description": "Find skills by describing the task, in a sentence, in whatever words the user used — the catalogue matches meaning as well as words, so \"make an animated picture for chat\" finds a Slack GIF skill that shares none of those words with it. Use when the user asks for a capability you do not have, or describes something a published skill might already do. If you already know the skill's name, call get_skill instead: this searches, that fetches. Read the first line of the result: it says whether these matched what you asked or are only related to it.",
+		"description": "Find skills by describing the task, in a sentence, in whatever words the user used — the catalogue matches meaning as well as words, so \"make an animated picture for chat\" finds a Slack GIF skill that shares none of those words with it. Use when the user asks for a capability you do not have, or describes something a published skill might already do. If you already know the skill's name, call get_skill instead: this searches, that fetches. Read the first line of the result: it says whether these matched what you asked or are only related to it. Each result then has a match line. high: it was named, or contains every word asked and matches by meaning -- a fair answer to recommend. medium: one kind of evidence -- read it with get_skill before recommending. low: related by meaning or by a few words only -- not an answer; say so, or keep looking.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -227,6 +227,9 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (st
 				label = "  [eval]"
 			}
 			fmt.Fprintf(&b, "%s/%s%s\n  %s\n", sk.Owner, sk.Slug, label, summarise(sk.Description))
+			if m := sk.Match; m != nil && m.Confidence != "" {
+				fmt.Fprintf(&b, "  match: %s%s\n", m.Confidence, evidence(m))
+			}
 			var bits []string
 			if sk.Latest != nil {
 				bits = append(bits, "v"+sk.Latest.Version,
@@ -397,4 +400,21 @@ func whereItGoes(kind string) string {
 	}
 	return "This is a skill, so llmsh unpacks it into .claude/skills/ in the project, " +
 		"or ~/.claude/skills/ otherwise, and verifies the package digest before writing anything."
+}
+
+// evidence says what found a result, in the order the catalogue lists it,
+// with the word count beside "words" so "words" alone never implies all of
+// them.
+func evidence(m *Match) string {
+	if len(m.By) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(m.By))
+	for _, by := range m.By {
+		if by == "words" && m.Words != "" {
+			by = "words " + m.Words
+		}
+		parts = append(parts, by)
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }

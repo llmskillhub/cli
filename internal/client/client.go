@@ -400,6 +400,16 @@ type SkillSummary struct {
 	Downloads   int      `json:"downloads"`
 	UpdatedAt   string   `json:"updated_at"`
 	Latest      *Version `json:"latest_version,omitempty"`
+	// Match is present on search results: why the catalogue returned this
+	// one and how far to trust it.
+	Match *Match `json:"match,omitempty"`
+}
+
+// Match is the API's confidence label for one search result.
+type Match struct {
+	Confidence string   `json:"confidence"`
+	By         []string `json:"by"`
+	Words      string   `json:"words,omitempty"`
 }
 
 // Search asks the catalogue, using the same endpoint and the same ranking the

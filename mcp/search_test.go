@@ -165,3 +165,32 @@ func TestReadingAFileDefaultsToSkillMD(t *testing.T) {
 		}
 	}
 }
+
+// Each result says how far to trust it, beside the evidence, so a model can
+// recommend the strong ones and read the weak ones before saying anything.
+func TestResultsCarryTheirMatchLine(t *testing.T) {
+	skills := []Skill{
+		{Owner: "someone", Slug: "named", Description: "Does a thing.",
+			Match: &Match{Confidence: "high", By: []string{"name", "words", "meaning"}, Words: "2/2"}},
+		{Owner: "someone", Slug: "nearby", Description: "Does another thing.",
+			Match: &Match{Confidence: "low", By: []string{"meaning"}}},
+	}
+	out := searchWith(t, &fakeCatalogue{skills: skills, meta: SearchMeta{Semantic: true}})
+	for _, want := range []string{
+		"match: high (name, words 2/2, meaning)",
+		"match: low (meaning)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+// A catalogue too old to label its results says nothing, rather than a match
+// line with no confidence in it.
+func TestNoMatchLineWithoutALabel(t *testing.T) {
+	out := searchWith(t, &fakeCatalogue{skills: oneSkill, meta: SearchMeta{Semantic: true}})
+	if strings.Contains(out, "match:") {
+		t.Errorf("an unlabelled result grew a match line:\n%s", out)
+	}
+}
