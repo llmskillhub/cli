@@ -211,7 +211,7 @@ func cmdInstall(args []string) error {
 func announce(agent target, owner, name, into string, _ *skill.Package) ([]string, error) {
 	var wrote []string
 	if agent.Name == "cursor" {
-		if path, ok := removeOldCursorRule(name); ok {
+		if path, ok := removeOldCursorRule(name, into); ok {
 			wrote = append(wrote, "removed "+path+": Cursor now loads the skill itself, and the rule repeated it")
 		}
 	}
@@ -232,13 +232,27 @@ func announce(agent target, owner, name, into string, _ *skill.Package) ([]strin
 // wrote for this skill, which now duplicates the skill Cursor loads natively.
 // Only a file carrying llmsh's own marker line is touched: a rule somebody
 // wrote by hand under the same name is theirs.
-func removeOldCursorRule(name string) (string, bool) {
-	path := filepath.Join(".cursor", "rules", name+".mdc")
-	b, err := os.ReadFile(path)
-	if err != nil || !strings.Contains(string(b), "installed by llmsh from llmskillhub.com") {
-		return "", false
+//
+// Two places to look. The old rule sat beside the skill -- .cursor/rules next
+// to the .cursor/skills it was installed into, ~/.cursor when that was the
+// root -- and was also written relative to wherever llmsh ran. Looking only
+// in the current directory missed ~/.cursor/rules whenever the reinstall ran
+// from somewhere else.
+func removeOldCursorRule(name, into string) (string, bool) {
+	candidates := []string{filepath.Join(".cursor", "rules", name+".mdc")}
+	if skills := filepath.Dir(into); filepath.Base(skills) == "skills" && filepath.Base(filepath.Dir(skills)) == ".cursor" {
+		candidates = append(candidates, filepath.Join(filepath.Dir(skills), "rules", name+".mdc"))
 	}
-	return path, os.Remove(path) == nil
+	for _, path := range candidates {
+		b, err := os.ReadFile(path)
+		if err != nil || !strings.Contains(string(b), "installed by llmsh from llmskillhub.com") {
+			continue
+		}
+		if os.Remove(path) == nil {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 // readInstructions reads the installed SKILL.md back and splits it into the

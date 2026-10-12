@@ -158,13 +158,34 @@ func TestReinstallingForCursorRemovesOnlyOurOldRule(t *testing.T) {
 	os.WriteFile(".cursor/rules/pdf-tools.mdc", []byte(ours), 0o644)
 	os.WriteFile(".cursor/rules/mine.mdc", []byte("my own rule"), 0o644)
 
-	if _, ok := removeOldCursorRule("pdf-tools"); !ok {
+	if _, ok := removeOldCursorRule("pdf-tools", ".cursor/skills/pdf-tools"); !ok {
 		t.Error("llmsh's own old rule was not removed")
 	}
 	if _, err := os.Stat(".cursor/rules/pdf-tools.mdc"); !os.IsNotExist(err) {
 		t.Error("the old rule is still there")
 	}
-	if _, ok := removeOldCursorRule("mine"); ok {
+	if _, ok := removeOldCursorRule("mine", ".cursor/skills/mine"); ok {
 		t.Error("a hand-written rule was removed")
+	}
+}
+
+// The rule beside a skill installed under ~/.cursor is found even when the
+// reinstall runs from another directory -- the case that left one behind.
+func TestTheOldRuleBesideTheSkillIsFoundFromAnywhere(t *testing.T) {
+	home := t.TempDir()
+	t.Chdir(t.TempDir())
+	rules := filepath.Join(home, ".cursor", "rules")
+	if err := os.MkdirAll(rules, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(rules, "brag-slim.mdc")
+	os.WriteFile(old, []byte("<!-- x/brag-slim, installed by llmsh from llmskillhub.com -->"), 0o644)
+
+	into := filepath.Join(home, ".cursor", "skills", "brag-slim")
+	if path, ok := removeOldCursorRule("brag-slim", into); !ok || path != old {
+		t.Fatalf("removed %q, %v; want %q", path, ok, old)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Error("the rule beside the skill is still there")
 	}
 }
