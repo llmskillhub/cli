@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/llmskillhub/cli/internal/client"
 	skill "github.com/llmskillhub/cli/skillpkg"
 )
 
@@ -97,9 +98,11 @@ func cmdInstall(args []string) error {
 	// The question is whether the bytes on disk are the bytes the registry just
 	// vouched for, which is answerable rather than guessable: the digest is
 	// recomputed from the existing directory. Identical means there is nothing
-	// to install and only the new agent to tell. Different means a real
-	// collision, and that still needs --force.
-	if _, err := os.Stat(into); err == nil && !*force {
+	// to install and only the new agent to tell. Different is decided after the
+	// download, by collision below.
+	_, statErr := os.Stat(into)
+	exists := statErr == nil
+	if exists && !*force {
 		have, _, derr := skill.PackDigest(into)
 		if derr == nil && want != "" && have == want {
 			wrote, err := announce(agent, owner, name, into, nil)
@@ -116,7 +119,6 @@ func cmdInstall(args []string) error {
 			}
 			return nil
 		}
-		return fmt.Errorf("%s already exists and holds something else\n  Pass --force to replace it", into)
 	}
 
 	// Unpacked to a temporary directory first, and moved into place only after
@@ -142,7 +144,22 @@ func cmdInstall(args []string) error {
 		return err
 	}
 
-	if *force {
+	// Something else is there. An earlier version of this same skill, exactly
+	// as the registry published it, is what an upgrade looks like, and asking
+	// for --force there teaches people to type --force without reading. Local
+	// edits and a different skill are real collisions, and are refused with
+	// what was found, so the person can decide whether losing it matters.
+	upgraded := ""
+	if exists && !*force {
+		// A failed lookup leaves the list empty, which only means no upgrade is
+		// recognised: the install is refused as before, never forced.
+		published, _ := c.Versions(owner, name)
+		upgraded, err = collision(into, owner, name, published, tmp)
+		if err != nil {
+			return err
+		}
+	}
+	if exists {
 		if err := os.RemoveAll(into); err != nil {
 			return err
 		}
@@ -174,6 +191,9 @@ func cmdInstall(args []string) error {
 	}
 	fmt.Printf("%s/%s@%s → %s\n", owner, name, shown, into)
 	fmt.Printf("  %d files · digest %s verified\n", len(pkg.Files), skill.ShortDigest(pkg.Digest))
+	if upgraded != "" {
+		fmt.Printf("  replaced %s, which was unmodified\n", upgraded)
+	}
 	for _, w := range wrote {
 		fmt.Printf("  %s\n", w)
 	}
@@ -239,6 +259,82 @@ func readInstructions(dir string) (body, description string, err error) {
 		}
 	}
 	return strings.TrimSpace(text), man.Description, nil
+}
+
+// collision decides whether the directory already at into may be replaced by
+// the verified version unpacked at incoming, without --force.
+//
+// Replaceable only when its digest is one the registry published for this
+// owner/name: then it is an earlier (or yanked, or simply other) release, byte
+// for byte, and nothing of the person's is lost. It returns that version.
+//
+// Anything else is refused with what was found, because "holds something else"
+// gives nobody enough to decide whether --force will cost them work: a
+// different skill is named, and a modified copy lists what --force would
+// overwrite or delete.
+func collision(into, owner, name string, published []client.Version, incoming string) (string, error) {
+	have, haveFiles, err := skill.PackDigest(into)
+	if err != nil {
+		return "", fmt.Errorf("%s already exists and can't be read as a skill (%v)\n"+
+			"  Pass --force to replace it", into, err)
+	}
+	for _, v := range published {
+		if v.Digest == have {
+			return v.Version, nil
+		}
+	}
+
+	if raw, rerr := os.ReadFile(filepath.Join(into, "SKILL.md")); rerr == nil {
+		if man, _ := skill.ParseManifest(raw); man.Name != "" && man.Name != name {
+			return "", fmt.Errorf("%s already exists and holds a different skill, %q\n"+
+				"  Pass --force to replace it, or --dir to install somewhere else", into, man.Name)
+		}
+	}
+
+	_, newFiles, err := skill.PackDigest(incoming)
+	if err != nil {
+		return "", err
+	}
+	changed := treeChanges(haveFiles, newFiles)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s already exists and matches no published version of %s/%s\n", into, owner, name)
+	// Compared with the version being installed, not with whichever release
+	// was edited: only digests are published, so the edited files can't be
+	// told apart from ones that merely changed between releases. What this
+	// list is exactly is what --force would overwrite or delete.
+	b.WriteString("  --force would overwrite or delete:\n")
+	for _, c := range changed {
+		fmt.Fprintf(&b, "    %s\n", c)
+	}
+	b.WriteString("  Pass --force to replace it, or copy out anything you changed first")
+	return "", fmt.Errorf("%s", b.String())
+}
+
+// treeChanges lists, by path, how the files in have differ from those in want:
+// "modified", "only here" (would be deleted) or "missing here" (would be added).
+func treeChanges(have, want []skill.FileEntry) []string {
+	wantBy := map[string]skill.FileEntry{}
+	for _, f := range want {
+		wantBy[f.Path] = f
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, f := range have {
+		seen[f.Path] = true
+		w, ok := wantBy[f.Path]
+		switch {
+		case !ok:
+			out = append(out, "only here: "+f.Path)
+		case w.SHA256 != f.SHA256 || w.Mode != f.Mode:
+			out = append(out, "modified: "+f.Path)
+		}
+	}
+	for _, f := range want {
+		if !seen[f.Path] {
+			out = append(out, "missing here: "+f.Path)
+		}
+	}
+	return out
 }
 
 // parseRef splits owner/name@version. Version is optional and means latest.
