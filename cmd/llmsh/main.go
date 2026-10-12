@@ -57,6 +57,8 @@ Flags:
   llmsh publish --dry-run        validate on the server without storing anything
   llmsh publish --private        into your space, not the catalogue; no review
   llmsh install name@1.2.0       install an exact version instead of the latest
+  llmsh install name --for cursor  install for another agent: claude (default),
+                                 cursor, codex, gemini, opencode
   llmsh install --dir ./skills   unpack somewhere specific
 
 Environment:

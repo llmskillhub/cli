@@ -175,10 +175,10 @@ func cmdInstall(args []string) error {
 	}
 
 	// The skill is on disk and verified. What remains is telling this
-	// particular agent about it, which for everything but Claude Code is a
-	// second file in a format that agent reads.
+	// particular agent about it, which for Codex and Gemini CLI is a block in
+	// the context file that agent reads; the others read the folder itself.
 	//
-	// After the move rather than before: a rule or a context block pointing at
+	// After the move rather than before: a context block pointing at
 	// a directory that failed to install is worse than neither.
 	wrote, err := announce(agent, owner, name, into, pkg)
 	if err != nil {
@@ -209,26 +209,36 @@ func cmdInstall(args []string) error {
 // each read one kind of file, so the skill's own instructions are written into
 // that file -- once, in a block this tool can find again.
 func announce(agent target, owner, name, into string, _ *skill.Package) ([]string, error) {
-	if agent.Rule == "" && agent.Context == "" {
-		return nil, nil
+	var wrote []string
+	if agent.Name == "cursor" {
+		if path, ok := removeOldCursorRule(name); ok {
+			wrote = append(wrote, "removed "+path+": Cursor now loads the skill itself, and the rule repeated it")
+		}
 	}
-	body, description, err := readInstructions(into)
+	if agent.Context == "" {
+		return wrote, nil
+	}
+	body, _, err := readInstructions(into)
 	if err != nil {
 		return nil, err
 	}
-	switch {
-	case agent.Rule != "":
-		path, err := writeRule(agent.Rule, owner, name, description, body, into)
-		if err != nil {
-			return nil, err
-		}
-		return []string{"rule written to " + path}, nil
-	default:
-		if err := writeContextBlock(agent.Context, owner, name, body, into); err != nil {
-			return nil, err
-		}
-		return []string{"block written in " + agent.Context}, nil
+	if err := writeContextBlock(agent.Context, owner, name, body, into); err != nil {
+		return nil, err
 	}
+	return append(wrote, "block written in "+agent.Context), nil
+}
+
+// removeOldCursorRule deletes the .cursor/rules/<name>.mdc an earlier llmsh
+// wrote for this skill, which now duplicates the skill Cursor loads natively.
+// Only a file carrying llmsh's own marker line is touched: a rule somebody
+// wrote by hand under the same name is theirs.
+func removeOldCursorRule(name string) (string, bool) {
+	path := filepath.Join(".cursor", "rules", name+".mdc")
+	b, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(b), "installed by llmsh from llmskillhub.com") {
+		return "", false
+	}
+	return path, os.Remove(path) == nil
 }
 
 // readInstructions reads the installed SKILL.md back and splits it into the
@@ -236,8 +246,8 @@ func announce(agent target, owner, name, into string, _ *skill.Package) ([]strin
 //
 // Read from disk rather than carried through from the archive: what is on disk
 // is what the agent will read, and if those two ever disagree the file wins.
-// The frontmatter is dropped, because it is our metadata -- an agent reading a
-// Cursor rule or an AGENTS.md block has its own idea of what a header means,
+// The frontmatter is dropped, because it is our metadata -- an agent reading an
+// AGENTS.md or GEMINI.md block has its own idea of what a header means,
 // and ours would appear as text in the middle of a document.
 func readInstructions(dir string) (body, description string, err error) {
 	raw, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
@@ -357,8 +367,8 @@ func parseRef(ref string) (owner, name, version string) {
 // because they ran an install is not this command's business.
 //
 // The personal fallback only applies to an agent that reads a skills directory.
-// The others are told about a skill through a project file -- AGENTS.md, a
-// Cursor rule -- and a skill in the home directory that no project file
+// The others are told about a skill through a project file -- AGENTS.md,
+// GEMINI.md -- and a skill in the home directory that no project file
 // mentions is one nothing will ever read, so for those the project directory is
 // created.
 func installDir(explicit string, agent target) (string, error) {
@@ -368,7 +378,7 @@ func installDir(explicit string, agent target) (string, error) {
 	if st, err := os.Stat(agent.Dir); err == nil && st.IsDir() {
 		return agent.Dir, nil
 	}
-	if agent.Rule != "" || agent.Context != "" {
+	if agent.Context != "" {
 		return agent.Dir, os.MkdirAll(agent.Dir, 0o755)
 	}
 	home, err := os.UserHomeDir()

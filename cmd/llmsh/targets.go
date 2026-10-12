@@ -12,8 +12,8 @@ import (
 //
 // A skill is a directory -- SKILL.md plus whatever it references -- and the
 // agents disagree about where such a directory lives and, more awkwardly,
-// whether it is a directory at all. Claude Code reads a tree of them. Cursor
-// reads rule files. Codex and Gemini CLI read one project context file each.
+// whether it is a directory at all. Claude Code, Cursor and opencode read a tree
+// of them. Codex and Gemini CLI read one project context file each.
 //
 // So installing for a non-Claude agent is two steps rather than one: the skill
 // itself is unpacked somewhere stable, and then that agent is told about it in
@@ -38,9 +38,6 @@ type target struct {
 	// Context is a single file that agent reads, empty when it reads Dir
 	// directly. When set, a delimited block naming the skill is kept in it.
 	Context string
-	// Rule is a per-skill file to write instead of a shared context file.
-	// Cursor works this way: one .mdc per rule, all in .cursor/rules.
-	Rule string
 	// Note is printed after a successful install, because "where did it go"
 	// and "will my agent read it" are different questions.
 	Note string
@@ -63,11 +60,14 @@ var targets = map[string]target{
 		Home: filepath.Join(".config", "opencode", "skills"),
 		Note: "opencode loads this on its own, by the description in SKILL.md.",
 	},
+	// Cursor loads skill folders natively now -- .cursor/skills in a project,
+	// ~/.cursor/skills otherwise, by the description in SKILL.md
+	// (cursor.com/docs/context/skills). It used to be told through a .mdc rule
+	// per skill, which now makes Cursor see the same instructions twice.
 	"cursor": {
 		Name: "cursor",
 		Dir:  filepath.Join(".cursor", "skills"),
-		Rule: filepath.Join(".cursor", "rules"),
-		Note: "Cursor reads the .mdc rule; it points at the skill directory for anything else the skill ships.",
+		Note: "Cursor loads this on its own, by the description in SKILL.md.",
 	},
 	"codex": {
 		Name:    "codex",
@@ -159,38 +159,4 @@ func writeContextBlock(path, owner, name, body, dir string) error {
 		text += "\n"
 	}
 	return os.WriteFile(path, []byte(text+block+"\n"), 0o644)
-}
-
-// writeRule writes one Cursor rule file for a skill.
-//
-// The frontmatter is Cursor's, not ours: description is what it matches on when
-// deciding whether a rule is relevant, and alwaysApply false is what makes that
-// a decision rather than a permanent addition to every prompt. A skill that
-// applied always would be a skill that is never chosen, which is the opposite
-// of what a description is for.
-func writeRule(dir, owner, name, description, body, skillDir string) (string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	path := filepath.Join(dir, name+".mdc")
-	front := []string{
-		"---",
-		"description: " + oneLine(description),
-		"alwaysApply: false",
-		"---",
-		"",
-		fmt.Sprintf("<!-- %s/%s, installed by llmsh from llmskillhub.com -->", owner, name),
-		"",
-	}
-	out := strings.Join(front, "\n") + body +
-		fmt.Sprintf("\n\nThe files for this skill are in %s.\n", skillDir)
-	return path, os.WriteFile(path, []byte(out), 0o644)
-}
-
-// oneLine flattens text that has to sit on a single YAML line.
-//
-// A description is prose and may be wrapped; a newline inside an unquoted YAML
-// scalar ends the value, so the rest of the sentence would become a key.
-func oneLine(s string) string {
-	return strings.Join(strings.Fields(s), " ")
 }

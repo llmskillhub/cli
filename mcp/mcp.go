@@ -14,6 +14,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -62,11 +63,11 @@ type Skill struct {
 	// Kind is "skill" or "eval", as the catalogue recorded it. An agent needs
 	// it before it acts: a skill is instructions it may load, an eval is test
 	// cases it must not. Empty from a catalogue too old to say, read as skill.
-	Kind string
-	Categories, Keywords     []string
-	License, Repository      string
-	Downloads                int
-	Latest                   *Version
+	Kind                 string
+	Categories, Keywords []string
+	License, Repository  string
+	Downloads            int
+	Latest               *Version
 	// Match is why a search returned this skill and how far to trust it. Nil
 	// outside search results, and from a catalogue too old to say.
 	Match *Match
@@ -113,6 +114,9 @@ type Server struct {
 	// transport. Empty refuses every Origin header, which is right: an MCP
 	// client sends none, and the ones that do are pages.
 	AllowedOrigins []string
+	// Observe, when set, is told what each request did, after it is handled.
+	// See Call for what it carries and, as importantly, what it doesn't.
+	Observe func(context.Context, Call)
 }
 
 // Cacheable results carry how long they are good for and who may share the
@@ -136,6 +140,14 @@ const instructions = "Search LLM SkillHub for published agent skills — reusabl
 // Handle dispatches one request and returns either a result or a JSON-RPC
 // error object.
 func (s *Server) Handle(ctx context.Context, method string, params json.RawMessage) (any, map[string]any) {
+	if s.Observe != nil {
+		c := &Call{Method: method, Results: -1}
+		if !knownMethods[method] {
+			c.Method = "other"
+		}
+		ctx = context.WithValue(ctx, callKey{}, c)
+		defer func() { s.Observe(ctx, *c) }()
+	}
 	switch method {
 	case "server/discover":
 		return map[string]any{
@@ -157,8 +169,15 @@ func (s *Server) Handle(ctx context.Context, method string, params json.RawMessa
 		// ours: a client on an older revision is telling us what it can parse.
 		var p struct {
 			ProtocolVersion string `json:"protocolVersion"`
+			ClientInfo      struct {
+				Name    string `json:"name"`
+				Version string `json:"version"`
+			} `json:"clientInfo"`
 		}
 		_ = json.Unmarshal(params, &p)
+		if c := recording(ctx); c != nil {
+			c.ClientName, c.ClientVersion = short(p.ClientInfo.Name), short(p.ClientInfo.Version)
+		}
 		version := p.ProtocolVersion
 		if version == "" {
 			version = VersionLegacy
@@ -186,8 +205,24 @@ func (s *Server) Handle(ctx context.Context, method string, params json.RawMessa
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, map[string]any{"code": -32602, "message": "invalid params"}
 		}
+		if c := recording(ctx); c != nil {
+			c.Tool = p.Name
+			if !knownTool(p.Name) {
+				c.Tool = "unknown"
+			}
+		}
 		text, err := s.call(ctx, p.Name, p.Arguments)
+		if errors.Is(err, ErrNotFound) {
+			// An answer, not a failure: see ErrNotFound.
+			if c := recording(ctx); c != nil {
+				c.NotFound = true
+			}
+			return textResult(s.notFoundAnswer(ctx, err, p.Arguments)), nil
+		}
 		if err != nil {
+			if c := recording(ctx); c != nil {
+				c.IsError = true
+			}
 			// A failed tool is reported in the result, not as an RPC error:
 			// the model should see what went wrong and be able to try
 			// something else, rather than the client treating it as a

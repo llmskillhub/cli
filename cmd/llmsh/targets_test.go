@@ -89,32 +89,6 @@ func TestAnUnterminatedBlockIsRefused(t *testing.T) {
 	}
 }
 
-// Cursor reads the frontmatter to decide whether a rule is relevant, so a
-// description spread over several lines would end the YAML value early and turn
-// the rest of the sentence into a key.
-func TestARuleKeepsItsDescriptionOnOneLine(t *testing.T) {
-	dir := t.TempDir()
-	path, err := writeRule(dir, "alice", "pdf-tools",
-		"Fills in PDF forms.\nUse when a form arrives as a PDF.", "Body here.", "d")
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := read(t, path)
-	lines := strings.Split(got, "\n")
-	if lines[0] != "---" {
-		t.Fatalf("a rule must open with frontmatter, got %q", lines[0])
-	}
-	if !strings.HasPrefix(lines[1], "description: ") || strings.Contains(lines[1], "\n") {
-		t.Errorf("description line is %q", lines[1])
-	}
-	if !strings.Contains(lines[1], "Use when a form arrives as a PDF.") {
-		t.Errorf("the second sentence was dropped: %q", lines[1])
-	}
-	if !strings.Contains(got, "alwaysApply: false") {
-		t.Error("a rule that always applies is never chosen by its description")
-	}
-}
-
 func TestEveryTargetIsUsable(t *testing.T) {
 	for _, name := range targetNames() {
 		tg, err := lookupTarget(name)
@@ -131,15 +105,12 @@ func TestEveryTargetIsUsable(t *testing.T) {
 		// Named rather than inferred: adding an agent to the table is the moment
 		// to decide which of the two it is, and a new name that is silently
 		// neither is the bug this catches.
-		readsFolders := name == "claude" || name == "opencode"
-		if !readsFolders && tg.Rule == "" && tg.Context == "" {
+		readsFolders := name == "claude" || name == "opencode" || name == "cursor"
+		if !readsFolders && tg.Context == "" {
 			t.Errorf("%s is told about a skill by nothing", name)
 		}
-		if readsFolders && (tg.Rule != "" || tg.Context != "") {
-			t.Errorf("%s reads folders, so it needs no rule or context file", name)
-		}
-		if tg.Rule != "" && tg.Context != "" {
-			t.Errorf("%s writes both a rule and a context block; pick one", name)
+		if readsFolders && tg.Context != "" {
+			t.Errorf("%s reads folders, so it needs no context file", name)
 		}
 	}
 	if _, err := lookupTarget("emacs"); err == nil {
@@ -173,5 +144,27 @@ func TestATargetWhoseGlobalPathDiffersSaysSo(t *testing.T) {
 	}
 	if !strings.Contains(oc.Home, "opencode") || !strings.Contains(oc.Home, "skills") {
 		t.Errorf("opencode Home is %q", oc.Home)
+	}
+}
+
+// A rule an older llmsh wrote is removed on reinstall; one somebody wrote by
+// hand under the same name is left alone.
+func TestReinstallingForCursorRemovesOnlyOurOldRule(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.MkdirAll(".cursor/rules", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ours := "---\ndescription: x\n---\n\n<!-- alice/pdf-tools, installed by llmsh from llmskillhub.com -->\n"
+	os.WriteFile(".cursor/rules/pdf-tools.mdc", []byte(ours), 0o644)
+	os.WriteFile(".cursor/rules/mine.mdc", []byte("my own rule"), 0o644)
+
+	if _, ok := removeOldCursorRule("pdf-tools"); !ok {
+		t.Error("llmsh's own old rule was not removed")
+	}
+	if _, err := os.Stat(".cursor/rules/pdf-tools.mdc"); !os.IsNotExist(err) {
+		t.Error("the old rule is still there")
+	}
+	if _, ok := removeOldCursorRule("mine"); ok {
+		t.Error("a hand-written rule was removed")
 	}
 }

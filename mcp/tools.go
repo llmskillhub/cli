@@ -14,6 +14,7 @@ var Tools = []map[string]any{
 	{
 		"name":        "search_skills",
 		"title":       "Search skills",
+		"annotations": readOnly("Search skills"),
 		"description": "Find skills by describing the task, in a sentence, in whatever words the user used — the catalogue matches meaning as well as words, so \"make an animated picture for chat\" finds a Slack GIF skill that shares none of those words with it. Use when the user asks for a capability you do not have, or describes something a published skill might already do. If you already know the skill's name, call get_skill instead: this searches, that fetches. Read the first line of the result: it says whether these matched what you asked or are only related to it. Each result then has a match line. high: it was named, or contains every word asked and matches by meaning -- a fair answer to recommend. medium: one kind of evidence -- read it with get_skill before recommending. low: related by meaning or by a few words only -- not an answer; say so, or keep looking.",
 		"inputSchema": map[string]any{
 			"type": "object",
@@ -27,6 +28,7 @@ var Tools = []map[string]any{
 	{
 		"name":        "get_skill",
 		"title":       "Get a skill",
+		"annotations": readOnly("Get a skill"),
 		"description": "Full detail for one named skill: description, categories, licence, and every published version with its digest and size. Use whenever you already know the name — from the user, from a link, or from a search_skills result — rather than searching for a name you have. Searching for a name you already know costs a call and can return something else.",
 		"inputSchema": map[string]any{
 			"type": "object",
@@ -40,6 +42,7 @@ var Tools = []map[string]any{
 	{
 		"name":        "read_skill_file",
 		"title":       "Read a file from a skill",
+		"annotations": readOnly("Read a file from a skill"),
 		"description": "Read one file out of a published version. Defaults to SKILL.md, the skill's own instructions, so a name alone answers \"what does this actually do\" — you do not need get_skill first. Pass path for any script or reference it ships.",
 		"inputSchema": map[string]any{
 			"type": "object",
@@ -55,12 +58,14 @@ var Tools = []map[string]any{
 	{
 		"name":        "list_categories",
 		"title":       "List categories",
+		"annotations": readOnly("List categories"),
 		"description": "The catalogue's category vocabulary, with how many skills are in each. Use to browse when a search term is not obvious.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{}},
 	},
 	{
-		"name":  "install_command",
-		"title": "How to install a skill",
+		"name":        "install_command",
+		"title":       "How to install a skill",
+		"annotations": readOnly("How to install a skill"),
 		// Deliberately returns the command instead of running it.
 		//
 		// Installing writes a stranger's instructions into a directory an
@@ -70,7 +75,7 @@ var Tools = []map[string]any{
 		// rather than a confirmation dialog bolted onto a side effect. It also
 		// happens to be the only honest answer over HTTP, where the server has
 		// no access to the caller's disk at all.
-		"description": "The exact command to install a skill. Show it to the user and let them run it — this does not install anything itself.",
+		"description": "The exact command to install a skill. Show it to the user and let them run it — this does not install anything itself. Pass agent with the agent you are running in, so the skill lands where that agent loads skills.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -78,9 +83,45 @@ var Tools = []map[string]any{
 				"owner":   map[string]any{"type": "string", "description": "Alternative to name."},
 				"slug":    map[string]any{"type": "string", "description": "Alternative to name."},
 				"version": map[string]any{"type": "string", "description": "Pin an exact version. Recommended."},
+				"agent": map[string]any{
+					"type":        "string",
+					"enum":        Agents,
+					"description": "The agent the skill is for: the one you are running in. Defaults to claude.",
+				},
 			},
 		},
 	},
+}
+
+// Agents are the agents llmsh install can put a skill where they load it
+// from (llmsh's --for). claude is the default, and gets no flag.
+var Agents = []string{"claude", "cursor", "codex", "gemini", "opencode"}
+
+// agentDirs says where each agent's skills land, for the agent to pass on.
+var agentDirs = map[string]string{
+	"claude":   ".claude/skills/ in the project, or ~/.claude/skills/ otherwise",
+	"cursor":   ".cursor/skills/ in the project, or ~/.cursor/skills/ otherwise, where Cursor loads it by its description",
+	"codex":    ".agents/skills/, announced in AGENTS.md",
+	"gemini":   ".agents/skills/, announced in GEMINI.md",
+	"opencode": ".opencode/skills/ in the project, or ~/.config/opencode/skills/ otherwise",
+}
+
+// readOnly is the annotation every tool here carries.
+//
+// Each one only reads the public catalogue -- install_command included, which
+// hands back a command rather than running it -- so Claude can call them
+// without asking each time. The directory requires a title and the matching
+// hint on every tool; a tool that writes anything must say destructiveHint
+// instead, and the test in tools_annotations_test.go makes that a decision
+// rather than an omission.
+func readOnly(title string) map[string]any {
+	return map[string]any{
+		"title":           title,
+		"readOnlyHint":    true,
+		"destructiveHint": false,
+		"idempotentHint":  true,
+		"openWorldHint":   false,
+	}
 }
 
 // call runs one tool and renders its answer as text.
@@ -152,6 +193,7 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (st
 		Slug     string `json:"slug"`
 		Path     string `json:"path"`
 		Version  string `json:"version"`
+		Agent    string `json:"agent"`
 	}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &a); err != nil {
@@ -164,6 +206,9 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (st
 	// "mcp-builder" should not have to search for the half it is missing.
 	if a.Name != "" {
 		a.Owner, a.Slug = splitName(a.Name)
+	}
+	if c := recording(ctx); c != nil && a.Slug != "" && name != "search_skills" {
+		c.Skill = short(joinNonEmpty([]string{a.Owner, a.Slug}, "/"))
 	}
 
 	switch name {
@@ -178,6 +223,15 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (st
 		skills, meta, err := s.Catalogue.Search(ctx, a.Query, a.Category, limit)
 		if err != nil {
 			return "", err
+		}
+		if c := recording(ctx); c != nil {
+			c.Results, c.TopMatch = len(skills), "none"
+			if len(skills) > 0 {
+				c.TopMatch = "unrated"
+				if m := skills[0].Match; m != nil && m.Confidence != "" {
+					c.TopMatch = m.Confidence
+				}
+			}
 		}
 		if len(skills) == 0 {
 			// How it looked decides what to do about it. Searched by meaning,
@@ -283,7 +337,7 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (st
 		if u := s.Catalogue.WebURL(sk.Owner, sk.Slug); u != "" {
 			fmt.Fprintf(&b, "\nPage: %s\n", u)
 		}
-		fmt.Fprintf(&b, "\n%s\n", whereItGoes(sk.Kind))
+		fmt.Fprintf(&b, "\n%s\n", whereItGoes(sk.Kind, ""))
 		return b.String(), nil
 
 	case "read_skill_file":
@@ -305,7 +359,7 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (st
 				return "", err
 			}
 			if len(vs) == 0 {
-				return "", fmt.Errorf("%s has no published versions", qualify(a.Owner, a.Slug))
+				return "", NotFoundWithin("%s has no published versions", qualify(a.Owner, a.Slug))
 			}
 			version = vs[0].Version
 		}
@@ -360,19 +414,33 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) (st
 		if a.Version != "" {
 			ref += "@" + a.Version
 		}
+		// The agent decides where a skill lands. Cursor installing without
+		// --for put a skill in Claude's folder, where Cursor never looked:
+		// the flag was in no description an agent reads. Unknown or empty is
+		// claude, the default, rather than an error.
+		agent := strings.ToLower(strings.TrimSpace(a.Agent))
+		if _, ok := agentDirs[agent]; !ok {
+			agent = "claude"
+		}
+		if c := recording(ctx); c != nil {
+			c.Agent = agent
+		}
+		cmd := s.InstallCommand + " " + ref
+		if agent != "claude" && sk.Kind != "eval" {
+			cmd += " --for " + agent
+		}
 		// One command for both kinds. llmsh asks the registry what it is
 		// downloading and sends it to the right place, so the instruction an
 		// agent passes on can never be the wrong command -- which it was for
 		// an eval, until install learned to route them.
 		return fmt.Sprintf(
-			"To install %s, the user runs:\n\n  %s %s\n\n%s\n\n"+
+			"To install %s, the user runs:\n\n  %s\n\n%s\n\n"+
 				"Show them this command rather than running it: it writes a third "+
 				"party's files to their machine, which is their decision to make.",
-			ref, s.InstallCommand, ref, whereItGoes(sk.Kind)), nil
+			ref, cmd, whereItGoes(sk.Kind, agent)), nil
 	}
 	return "", fmt.Errorf("no such tool: %s", name)
 }
-
 
 func kindName(kind string) string {
 	if kind == "eval" {
@@ -392,14 +460,20 @@ the one outcome the separation exists to prevent. llmsh decides this itself from
 what the registry says it downloaded, so the instruction is the same command for
 both -- this only tells the reader what that command will do.
 */
-func whereItGoes(kind string) string {
+func whereItGoes(kind, agent string) string {
 	if kind == "eval" {
 		return "This is an eval, so llmsh unpacks it into ./evals/ — never into a " +
 			"skills directory, where an agent would read its test cases as instructions. " +
 			"It is for running and grading, not for loading."
 	}
-	return "This is a skill, so llmsh unpacks it into .claude/skills/ in the project, " +
-		"or ~/.claude/skills/ otherwise, and verifies the package digest before writing anything."
+	if agent == "" {
+		// Not known here (get_skill takes no agent): don't name one agent's
+		// folder to every other agent, which is how Cursor ended up in Claude's.
+		return "This is a skill. install_command gives the exact command for the agent " +
+			"you are running in; llmsh verifies the package digest before writing anything."
+	}
+	return "This is a skill, so llmsh unpacks it into " + agentDirs[agent] +
+		", and verifies the package digest before writing anything."
 }
 
 // evidence says what found a result, in the order the catalogue lists it,
